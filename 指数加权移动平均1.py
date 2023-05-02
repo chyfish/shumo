@@ -1,10 +1,31 @@
-import numpy as np
+import np as np
 import pandas as pd
 import math
-import scipy.interpolate as interp1d
-import xlrd
+from scipy.interpolate import interp1d
 
 
+# res 是输入数据
+# alpha 是指数加权平均的衰减因子。
+# 通过循环计算得到了未经过修正的指数加权平均 ewma，然后计算了一个偏差修正系数 corr_factor，最后将这两个值相乘得到了修正后的指数加权平均 ewma_corr。
+def ewma_bias_corr(res, alpha):
+    # 计算指数加权平均
+    ewma = np.zeros(len(res))
+    ewma[0] = res[0]
+    for index in range(1, len(res)):
+        ewma[index] = alpha * res[index] + (1 - alpha) * ewma[index - 1]
+
+    zeros = np.zeros_like(np.arange(0, len(res)))
+    zeros[np.power(1 - alpha, np.arange(0, len(res))) == 0] = 1e-8
+    eps = 1e-6
+    # 该函数使用的是动态偏差修正算法，其思想是将时间序列中每个时间点之前的所有数据都视为初始状态，然后逐步将当前的数据融入进去，这样就能够消除初始状态带来的影响
+    denominator = 1 - np.power(1 - alpha, np.arange(0, len(res)) + zeros)
+    denominator[denominator < eps] = eps
+    corr_factor = 1 / denominator
+    corr_factor[0] = 1
+    # 对指数加权平均进行偏差修正
+    ewma_corr = ewma * corr_factor
+
+    return ewma_corr
 # 导入ExpMovAvg类
 class ExpMovAvg(object):
     def __init__(self, decay=0.9):
@@ -26,6 +47,7 @@ class ExpMovAvg(object):
 
 
 # 要获取的列column_index，decay衰减系数，
+
 def nvd(column_index=0, extent=1.2, decay=0.8):
     # 读取 Excel 表格中的数据
     df = pd.read_excel('datas.xls', sheet_name='Sheet1', header=None)
@@ -39,6 +61,10 @@ def nvd(column_index=0, extent=1.2, decay=0.8):
         smoothed_data = ema.update(data[i], t=i + 1, is_biased=True)
         res.append(smoothed_data)
         print(smoothed_data)
+
+    # 对于前window和后window个数所产生的移动方差归一化处理，然后使用插值技术将它们扩展到与原始数据序列一样的长度。具体地说，我们可以先计算正常区域（即窗口可以滑动的区域）的移动方差，然后计算前window和后window个数的移动方差均值，并与正常区域的移动方差序列一起进行插值，将结果扩展到原始数据序列的长度。
+    # 设定移动窗口大小
+    window = 7
 
     # 对始端进行修正
     # 方案一：计算简单移动平均
@@ -54,10 +80,6 @@ def nvd(column_index=0, extent=1.2, decay=0.8):
     ewma_corr = ewma_bias_corr(res, 0.8)
     for j in range(10):
         res[j] = ewma_corr[j]
-
-    # 对于前window和后window个数所产生的移动方差归一化处理，然后使用插值技术将它们扩展到与原始数据序列一样的长度。具体地说，我们可以先计算正常区域（即窗口可以滑动的区域）的移动方差，然后计算前window和后window个数的移动方差均值，并与正常区域的移动方差序列一起进行插值，将结果扩展到原始数据序列的长度。
-    # 设定移动窗口大小
-    window = 7
 
     # 计算实际值的平均值
     mean_values = []
@@ -98,31 +120,23 @@ def nvd(column_index=0, extent=1.2, decay=0.8):
     upperlimit = np.add(res, sqrt_variances)
     downlimit = np.subtract(res, sqrt_variances)
 
-    outcome = [data, upperlimit, downlimit]
+
+    # 判断当前值是否超出范围
+    flag_arr=np.zeros(100)
+    for j in range(100):
+            if (data[j] > upperlimit[j]) or (data[j] < downlimit[j]):
+                flag_arr[j] = 1
+            else:
+                # 未超出范围，将标注为 0
+                flag_arr[j] = 0
+
+    outcome = [data, upperlimit, downlimit,flag_arr]
     new_df = pd.DataFrame(outcome)
-    new_df.to_excel('output1{}.xlsx'.format(i), index=False)
+    new_df=new_df.transpose()
+    new_df.columns = ['data', 'max', 'min', 'isout']
+    new_df.to_excel('output{}.xlsx'.format(column_index+1), index=False)
     print(f"数据已经成功保存到 outcome.xlsx 中")
 
 
-# res 是输入数据
-# alpha 是指数加权平均的衰减因子。
-# 通过循环计算得到了未经过修正的指数加权平均 ewma，然后计算了一个偏差修正系数 corr_factor，最后将这两个值相乘得到了修正后的指数加权平均 ewma_corr。
-def ewma_bias_corr(res, alpha):
-    # 计算指数加权平均
-    ewma = np.zeros(len(res))
-    ewma[0] = res[0]
-    for index in range(1, len(res)):
-        ewma[index] = alpha * res[index] + (1 - alpha) * ewma[index - 1]
-
-    zeros = np.zeros_like(np.arange(0, len(res)))
-    zeros[np.power(1 - alpha, np.arange(0, len(res))) == 0] = 1e-8
-    eps = 1e-6
-    # 该函数使用的是动态偏差修正算法，其思想是将时间序列中每个时间点之前的所有数据都视为初始状态，然后逐步将当前的数据融入进去，这样就能够消除初始状态带来的影响
-    denominator = 1 - np.power(1 - alpha, np.arange(0, len(res)) + zeros)
-    denominator[denominator < eps] = eps
-    corr_factor = 1 / denominator
-
-    # 对指数加权平均进行偏差修正
-    ewma_corr = ewma * corr_factor
-
-    return ewma_corr
+for i in range(8):
+    nvd(i,1.5)
