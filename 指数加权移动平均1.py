@@ -7,16 +7,7 @@ from scipy.interpolate import interp1d
 # res 是输入数据
 # alpha 是指数加权平均的衰减因子。
 # 通过循环计算得到了未经过修正的指数加权平均 ewma，然后计算了一个偏差修正系数 corr_factor，最后将这两个值相乘得到了修正后的指数加权平均 ewma_corr。
-def ewma_bias_corr(res, alpha):
-    # 计算指数加权平均
-    ewma = np.zeros(len(res))
-    ewma[0] = res[0]
-    for index in range(1, len(res)):
-        ewma[index] = alpha * res[index] + (1 - alpha) * ewma[index - 1]
-
-    zeros = np.zeros_like(np.arange(0, len(res)))
-    zeros[np.power(1 - alpha, np.arange(0, len(res))) == 0] = 1e-8
-    eps = 1e-6
+def ewma_bias_corr(res, alewma_bias_corrpha):
     # 该函数使用的是动态偏差修正算法，其思想是将时间序列中每个时间点之前的所有数据都视为初始状态，然后逐步将当前的数据融入进去，这样就能够消除初始状态带来的影响
     denominator = 1 - np.power(1 - alpha, np.arange(0, len(res)) + zeros)
     denominator[denominator < eps] = eps
@@ -24,7 +15,6 @@ def ewma_bias_corr(res, alpha):
     corr_factor[0] = 1
     # 对指数加权平均进行偏差修正
     ewma_corr = ewma * corr_factor
-
     return ewma_corr
 # 导入ExpMovAvg类
 class ExpMovAvg(object):
